@@ -1,0 +1,40 @@
+name: Keepalive
+
+# 目的：GitHub 会对「超过 60 天没有任何仓库活动」的公共仓库自动禁用 schedule 定时工作流。
+# 本工作流每周运行一次，当最近一次 commit 已超过 40 天时，推送一个空提交，
+# 使仓库保持"有活动"，从而签到用的 checkin.yml 永不因静止而被自动停用。
+# 纯 bash + 内置 GITHUB_TOKEN 实现，零第三方 Action 依赖（零信任）。
+
+on:
+  schedule:
+    # 每周日 06:00 UTC（北京时间 14:00）
+    - cron: "0 6 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Push keepalive commit if repo idle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          last_ts=$(git log -1 --format=%ct)
+          now_ts=$(date +%s)
+          idle_days=$(( (now_ts - last_ts) / 86400 ))
+          echo "last commit was ${idle_days} days ago"
+          if [ "$idle_days" -ge 40 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keep scheduled workflow active"
+            git push origin HEAD:${GITHUB_REF_NAME}
+            echo "keepalive commit pushed after ${idle_days} days idle"
+          else
+            echo "repo active ${idle_days} days ago, no keepalive needed"
+          fi
