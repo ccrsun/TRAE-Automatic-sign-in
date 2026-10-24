@@ -33,8 +33,17 @@ if [[ -z "$PYTHON_BIN" ]]; then
   exit 1
 fi
 
+set +e
 {
   echo "===== $(date '+%Y-%m-%d %H:%M:%S') ====="
   cd "$SCRIPT_DIR"
   "$PYTHON_BIN" checkin.py
 } 2>&1 | tee -a "$LOG_FILE"
+status=${PIPESTATUS[0]}
+set -e
+
+# 退出码 2 = Session 失效，需要重新登录后更新凭证
+if [[ $status -eq 2 ]]; then
+  echo "Session 已失效：请重新登录 Trae 获取 X-Cloudide-Session 并更新 $ENV_FILE" | tee -a "$LOG_FILE"
+fi
+exit "$status"

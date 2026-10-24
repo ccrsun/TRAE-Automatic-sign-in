@@ -26,15 +26,41 @@ import json
 import os
 import random
 import sys
+import urllib.error
 import urllib.request
 
 BASE = "https://api.trae.cn"
+NEED_LOGIN_MARKER = os.path.expanduser("~/.trae_checkin.need_login")
+
+
+class SessionExpired(RuntimeError):
+    """X-Cloudide-Session 已失效，需要重新登录 Trae。"""
+
+
+def mark_need_login(reason):
+    """记录“需要重新登录”标记，供人工/助手发现后刷新凭证。"""
+    try:
+        with open(NEED_LOGIN_MARKER, "w", encoding="utf-8") as f:
+            f.write("%s %s\n" % (beijing_now_str(), reason))
+    except OSError:
+        pass
+
+
+def clear_need_login():
+    try:
+        os.remove(NEED_LOGIN_MARKER)
+    except OSError:
+        pass
 
 
 def _post(path, headers, body=""):
     req = urllib.request.Request(BASE + path, data=body.encode("utf-8"), headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.status, resp.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        # 401/403 等错误也按正常响应返回，交给调用方判定
+        return e.code, e.read().decode("utf-8", errors="replace")
 
 
 def get_token(session: str) -> str:
@@ -47,10 +73,17 @@ def get_token(session: str) -> str:
         "Accept": "application/json, text/plain, */*",
     }
     status, text = _post("/cloudide/api/v3/common/GetUserToken", headers)
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        data = {}
     token = (data.get("Result") or {}).get("Token")
     if status != 200 or not token:
-        raise RuntimeError("GetUserToken 失败: HTTP %s %s" % (status, text[:200]))
+        msg = "GetUserToken 失败: HTTP %s %s" % (status, text[:200])
+        # 200 但没有 Token、或 401/403 都说明会话 Cookie 已失效
+        if status in (200, 401, 403):
+            raise SessionExpired(msg)
+        raise RuntimeError(msg)
     return token
 
 
@@ -117,6 +150,7 @@ def main():
     webhook = os.environ.get("FEISHU_WEBHOOK", "").strip()
     ok_names, fail_names = [], []
     all_ok = True
+    session_invalid = False
 
     for index, session, device_id in accounts:
         name = "账号 %d" % index
@@ -139,6 +173,12 @@ def main():
                 print("[%s] 签到失败：%s" % (name, reason))
                 fail_names.append(name)
                 all_ok = False
+        except SessionExpired as e:
+            print("[%s] 会话已失效: %s" % (name, e))
+            mark_need_login(str(e))
+            fail_names.append(name)
+            session_invalid = True
+            all_ok = False
         except Exception as e:
             print("[%s] 签到异常: %s" % (name, e))
             fail_names.append(name)
@@ -150,11 +190,17 @@ def main():
         summary.append("成功：" + "、".join(ok_names))
     if fail_names:
         summary.append("失败：" + "、".join(fail_names))
+    if session_invalid:
+        summary.append("注意：Session 已失效，需要重新登录 Trae 更新 TRAE_SESSION")
     if webhook and (ok_names or fail_names):
         notify_feishu(webhook, "\n".join(summary))
 
+    if session_invalid:
+        print("提示：Session 已失效，请重新登录 Trae 获取 X-Cloudide-Session 并更新 TRAE_SESSION 后重试。")
+        sys.exit(2)
     if not all_ok:
         sys.exit(1)
+    clear_need_login()
     print("全部账号签到完成")
 
 

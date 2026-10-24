@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # 安装 Trae 自动签到定时任务（可重复执行，不会覆盖其它 cron 任务）
-# 默认每天 08:00 执行；可用 TRAE_CHECKIN_SCHEDULE 覆盖，例如：
+# 默认每天 00:05 执行；可用 TRAE_CHECKIN_SCHEDULE 覆盖，例如：
 #   TRAE_CHECKIN_SCHEDULE='30 7 * * *' ./install-cron.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$SCRIPT_DIR/trae-checkin.sh"
-SCHEDULE="${TRAE_CHECKIN_SCHEDULE:-0 8 * * *}"
+SCHEDULE="${TRAE_CHECKIN_SCHEDULE:-5 0 * * *}"
 MARKER="# trae-checkin"
+
+if ! command -v crontab >/dev/null 2>&1; then
+  echo "未找到 crontab，请先安装 cron（Debian/Ubuntu: sudo apt install cron；macOS 自带 cron）" >&2
+  exit 1
+fi
 
 chmod +x "$RUNNER"
 LINE="$SCHEDULE $RUNNER $MARKER"
