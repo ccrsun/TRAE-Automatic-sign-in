@@ -9,8 +9,16 @@ ENV_FILE="${TRAE_CHECKIN_ENV:-$SCRIPT_DIR/trae-checkin.env}"
 LOG_FILE="${TRAE_CHECKIN_LOG:-$HOME/trae_checkin.log}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "缺少凭证文件: $ENV_FILE" >&2
-  exit 1
+  # 工作区被重置时凭证文件会丢失，从用户主目录的持久备份恢复
+  BACKUP_ENV="$HOME/.trae-checkin.env"
+  if [[ -f "$BACKUP_ENV" ]]; then
+    echo "凭证文件缺失，已从 $BACKUP_ENV 恢复"
+    cp "$BACKUP_ENV" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+  else
+    echo "缺少凭证文件: $ENV_FILE（且未找到 $BACKUP_ENV）" >&2
+    exit 1
+  fi
 fi
 
 set -a
